@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.vercel/
+*.log
+
+# Firebase Admin keys must never be committed
+*service-account*.json
+*-firebase-adminsdk-*.json
+.vercel
+
+# Files from other hosting tools
+.openai/

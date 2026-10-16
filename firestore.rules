@@ -1,0 +1,86 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    // Admins carry the `admin` custom claim, set only by scripts/set-admin.mjs with the Admin SDK.
+    function isAdmin() { return signedIn() && request.auth.token.admin == true && request.auth.token.email_verified == true; }
+    function isSelf(uid) { return signedIn() && request.auth.uid == uid; }
+    function profilePath(uid) { return /databases/$(database)/documents/users/$(uid); }
+    // Blocked users, and suspended users until their suspension ends, lose access to their planner.
+    function isActive(uid) {
+      return !exists(profilePath(uid))
+        || get(profilePath(uid)).data.status == 'active'
+        || (get(profilePath(uid)).data.status == 'suspended' && get(profilePath(uid)).data.suspendedUntil < request.time);
+    }
+    function selfProfileFields() {
+      return ['email', 'displayName', 'emailVerified', 'timezone', 'notificationsOn', 'emailOn', 'activityCount', 'lastActiveAt'];
+    }
+    function statusFields() { return ['status', 'suspendedUntil', 'statusReason', 'statusUpdatedAt', 'statusUpdatedBy']; }
+
+    // User directory: written by the user (profile summary only) and by admins (status only).
+    match /users/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow create: if isSelf(uid)
+        && request.resource.data.keys().hasOnly(selfProfileFields().concat(['status', 'createdAt']))
+        && request.resource.data.status == 'active'
+        && request.resource.data.createdAt == request.time;
+      allow update: if (isSelf(uid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(selfProfileFields()))
+        || (isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(statusFields())
+            && request.resource.data.status in ['active', 'suspended', 'blocked']);
+
+      match /planner/{document} {
+        // emailLog is written only by the reminder server (Admin SDK).
+        allow read: if (isSelf(uid) && (document == 'emailLog' || isActive(uid))) || (isAdmin() && document in ['state', 'emailLog']);
+        allow create, update: if isSelf(uid) && isActive(uid) && document == 'state'
+          && request.resource.data.keys().hasOnly(['payload', 'updatedAt'])
+          && request.resource.data.payload is map
+          && request.resource.data.payload.activities is list
+          && request.resource.data.payload.done is map
+          && request.resource.data.payload.logs is list
+          && request.resource.data.payload.reminders is bool
+          && request.resource.data.updatedAt == request.time;
+        allow delete: if isSelf(uid) && isActive(uid) && document == 'state';
+      }
+
+      // Messages from the admin, shown in the user's Notifications page.
+      match /inbox/{id} {
+        allow read: if isSelf(uid) || isAdmin();
+        allow create: if isAdmin() && request.resource.data.keys().hasOnly(['title', 'body', 'createdAt', 'read', 'from'])
+          && request.resource.data.read == false && request.resource.data.createdAt == request.time;
+        allow update: if isSelf(uid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+        allow delete: if isSelf(uid) || isAdmin();
+      }
+    }
+
+    // Help tickets. Blocked users can still raise and follow them (e.g. to request access).
+    match /tickets/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'email', 'name', 'category', 'subject', 'message', 'status', 'replies', 'createdAt', 'updatedAt'])
+        && request.resource.data.status == 'open'
+        && request.resource.data.category in ['help', 'bug', 'access', 'account', 'feedback']
+        && request.resource.data.subject is string && request.resource.data.subject.size() > 0 && request.resource.data.subject.size() <= 120
+        && request.resource.data.message is string && request.resource.data.message.size() > 0 && request.resource.data.message.size() <= 4000
+        && request.resource.data.replies.size() == 0
+        && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
+      // The owner may only add one reply at a time; admins may change status and reply.
+      allow update: if (isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'replies', 'updatedAt'])
+            && request.resource.data.status in ['open', 'in_progress', 'resolved', 'closed'])
+        || (signedIn() && resource.data.uid == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['replies', 'updatedAt', 'status'])
+            && request.resource.data.replies.size() == resource.data.replies.size() + 1
+            && request.resource.data.status in [resource.data.status, 'open']);
+    }
+
+    // Daily email counters, written by the reminder server.
+    match /emailStats/{day} {
+      allow read: if isAdmin();
+    }
+
+    // Record of admin actions.
+    match /adminAudit/{id} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() && request.resource.data.by == request.auth.token.email && request.resource.data.at == request.time;
+    }
+  }
+}

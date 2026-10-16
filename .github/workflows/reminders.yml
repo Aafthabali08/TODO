@@ -1,0 +1,13 @@
+# Optional: triggers the reminder job every hour, so users in every timezone get their
+# email shortly after 8 PM local time. Vercel's free cron (vercel.json) runs once a day.
+# Add repository secrets APP_URL (e.g. https://your-app.vercel.app) and CRON_SECRET.
+name: Dayform 8 PM reminders
+on:
+  schedule:
+    - cron: '5 * * * *'
+  workflow_dispatch:
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl --fail-with-body -sS -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" "${{ secrets.APP_URL }}/api/daily-reminders"

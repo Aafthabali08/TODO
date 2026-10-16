@@ -1,0 +1,8 @@
+# Never upload local secrets or build output; Vercel builds from source and reads env vars from its dashboard.
+.env
+.env.*
+!.env.example
+node_modules
+dist
+*service-account*.json
+*-firebase-adminsdk-*.json
