@@ -12,12 +12,17 @@ export function createCloud(db, auth) {
   const restriction = p => !p ? null : p.status === 'blocked' ? { status: 'blocked', reason: p.statusReason || '' }
     : p.status === 'suspended' && p.suspendedUntil && Date.parse(p.suspendedUntil) > Date.now() ? { status: 'suspended', until: p.suspendedUntil, reason: p.statusReason || '' } : null;
 
+  // Reads the profile once; creating or refreshing it happens in the background so sign-in never waits on a write.
   async function ensureProfile(user) {
     const ref = profileRef(user.uid), snap = await getDoc(ref);
     const base = { email: user.email || '', displayName: user.displayName || '', emailVerified: !!user.emailVerified, lastActiveAt: serverTimestamp() };
-    if (!snap.exists()) await setDoc(ref, { ...base, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, notificationsOn: false, emailOn: true, activityCount: 0, status: 'active', createdAt: serverTimestamp() });
-    else await updateDoc(ref, base);
-    return plain(await getDoc(ref));
+    if (!snap.exists()) {
+      const fresh = { ...base, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, notificationsOn: false, emailOn: true, activityCount: 0, status: 'active', createdAt: serverTimestamp() };
+      setDoc(ref, fresh).catch(e => console.warn('Profile not created:', e.code));
+      return { id: user.uid, status: 'active' };
+    }
+    updateDoc(ref, base).catch(e => console.warn('Profile not refreshed:', e.code));
+    return plain(snap);
   }
   let pendingSummary = null, summaryTimer = null;
   // Keeps the admin-visible summary current, at most once every 30 seconds.
@@ -45,7 +50,8 @@ export function createCloud(db, auth) {
   const markRead = id => updateDoc(doc(db, 'users', me().uid, 'inbox', id), { read: true });
 
   // ---- Admin ----
-  async function isAdmin() { const u = me(); if (!u) return false; const t = await u.getIdTokenResult(); return t.claims.admin === true && t.claims.email_verified === true; }
+  // Forces a fresh token so a newly granted admin role shows up without signing out.
+  async function isAdmin() { const u = me(); if (!u) return false; const t = await u.getIdTokenResult(true); return t.claims.admin === true && t.claims.email_verified === true; }
   async function audit(action, target, details = '') { try { await addDoc(collection(db, 'adminAudit'), { by: me().email, at: serverTimestamp(), action, target, details }); } catch (e) { console.warn('Audit not saved:', e.code); } }
   const listUsers = async () => (await getDocs(collection(db, 'users'))).docs.map(plain);
   const listTickets = async () => (await getDocs(collection(db, 'tickets'))).docs.map(plain).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
