@@ -193,3 +193,9 @@ nav button[hidden],.bell-badge[hidden]{display:none}
 .admin-users td.row-actions{text-align:left}
 .restricted-screen .auth-story>div{display:block}
 .restricted-screen .auth-story h1{font-size:28px}}
+.auth-divider{display:flex;align-items:center;gap:12px;margin:18px 0 14px;color:#9aa38f;font-size:10px;letter-spacing:1px;text-transform:uppercase}
+.auth-divider::before,.auth-divider::after{content:'';flex:1;height:1px;background:#e3e8dc}
+.auth-divider[hidden],.google-button[hidden]{display:none}
+.google-button{display:flex;align-items:center;justify-content:center;gap:10px;padding:11px 16px;border:1px solid #dadce0;border-radius:9px;background:#fff;color:#3c4043;font-family:Roboto,'DM Sans',Arial,sans-serif;font-size:13px;font-weight:500;box-shadow:0 1px 2px #3c40430d}
+.google-button:hover{background:#f8faf9;box-shadow:0 2px 6px #3c404314}
+.google-icon{width:18px;height:18px;flex-shrink:0}
